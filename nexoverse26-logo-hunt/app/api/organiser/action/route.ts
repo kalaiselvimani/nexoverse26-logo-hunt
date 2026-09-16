@@ -12,10 +12,9 @@ export async function POST(req: Request) {
     }
 
     const supabaseAdmin = getSupabaseAdmin();
-
     const { action } = await req.json();
 
-    // Get the latest event
+    // Get latest event
     const { data: event, error: ee } = await supabaseAdmin
       .from("events")
       .select("*")
@@ -37,6 +36,9 @@ export async function POST(req: Request) {
 
     let patch: any = {};
 
+    // --------------------------------
+    // START GAME
+    // --------------------------------
     if (action === "start_game") {
       let qid = event.active_question_id;
       let rid = event.active_round_id;
@@ -45,7 +47,8 @@ export async function POST(req: Request) {
         const { data: first, error } = await supabaseAdmin
           .from("questions")
           .select("id,round_id")
-          .order("sort_order")
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true })
           .limit(1)
           .maybeSingle();
 
@@ -77,6 +80,9 @@ export async function POST(req: Request) {
       };
     }
 
+    // --------------------------------
+    // PAUSE
+    // --------------------------------
     if (action === "pause") {
       patch = {
         paused: true,
@@ -84,40 +90,55 @@ export async function POST(req: Request) {
       };
     }
 
+    // --------------------------------
+    // RESUME
+    // --------------------------------
     if (action === "resume") {
       patch = {
         paused: false
       };
     }
 
+    // --------------------------------
+    // REVEAL QUESTION
+    // --------------------------------
     if (action === "reveal_question") {
       patch = {
         question_visible: true
       };
     }
 
+    // --------------------------------
+    // REVEAL LOGO
+    // --------------------------------
     if (action === "reveal_logo") {
       patch = {
         logo_visible: true
       };
     }
 
-    if (
-      action === "open_buzzer" ||
-      action === "reopen_buzzer"
-    ) {
+    // --------------------------------
+    // OPEN BUZZER
+    // --------------------------------
+    if (action === "open_buzzer") {
       patch = {
         buzzer_open: true,
         buzzer_attempt: (event.buzzer_attempt || 0) + 1
       };
     }
 
+    // --------------------------------
+    // CLOSE BUZZER
+    // --------------------------------
     if (action === "close_buzzer") {
       patch = {
         buzzer_open: false
       };
     }
 
+    // --------------------------------
+    // END GAME
+    // --------------------------------
     if (action === "end_game") {
       patch = {
         status: "ended",
@@ -125,6 +146,9 @@ export async function POST(req: Request) {
       };
     }
 
+    // --------------------------------
+    // NEXT QUESTION
+    // --------------------------------
     if (action === "next_question") {
       if (!event.active_question_id) {
         return NextResponse.json(
@@ -136,38 +160,135 @@ export async function POST(req: Request) {
         );
       }
 
-      const { data: q, error: qe } = await supabaseAdmin
-        .from("questions")
-        .select("round_id,sort_order")
-        .eq("id", event.active_question_id)
-        .single();
+      // Get current question
+      const { data: currentQuestion, error: currentError } =
+        await supabaseAdmin
+          .from("questions")
+          .select(`
+            id,
+            round_id,
+            sort_order,
+            created_at
+          `)
+          .eq("id", event.active_question_id)
+          .single();
 
-      if (qe) throw qe;
+      if (currentError) throw currentError;
 
-      const { data: n, error: ne } = await supabaseAdmin
-        .from("questions")
-        .select("id,round_id")
-        .eq("round_id", q.round_id)
-        .gt("sort_order", q.sort_order)
-        .order("sort_order", { ascending: true })
-        .limit(1)
-        .maybeSingle();
+      // --------------------------------
+      // STEP 1:
+      // Find next question in SAME ROUND
+      // --------------------------------
+      let nextQuestion: any = null;
 
-      if (ne) throw ne;
+      const { data: sameRoundQuestions, error: sameRoundError } =
+        await supabaseAdmin
+          .from("questions")
+          .select(`
+            id,
+            round_id,
+            sort_order,
+            created_at
+          `)
+          .eq("round_id", currentQuestion.round_id)
+          .order("sort_order", { ascending: true })
+          .order("created_at", { ascending: true });
 
-      if (!n) {
+      if (sameRoundError) throw sameRoundError;
+
+      const currentIndex =
+        (sameRoundQuestions || []).findIndex(
+          (q) => q.id === currentQuestion.id
+        );
+
+      if (
+        currentIndex >= 0 &&
+        currentIndex + 1 < (sameRoundQuestions || []).length
+      ) {
+        nextQuestion = sameRoundQuestions[currentIndex + 1];
+      }
+
+      // --------------------------------
+      // STEP 2:
+      // If current round finished,
+      // find NEXT ROUND
+      // --------------------------------
+      if (!nextQuestion) {
+        const { data: currentRound, error: roundError } =
+          await supabaseAdmin
+            .from("rounds")
+            .select(`
+              id,
+              sort_order,
+              created_at
+            `)
+            .eq("id", currentQuestion.round_id)
+            .single();
+
+        if (roundError) throw roundError;
+
+        // Find next round
+        const { data: nextRounds, error: nextRoundError } =
+          await supabaseAdmin
+            .from("rounds")
+            .select(`
+              id,
+              sort_order,
+              created_at
+            `)
+            .gt("sort_order", currentRound.sort_order)
+            .order("sort_order", { ascending: true })
+            .order("created_at", { ascending: true })
+            .limit(1);
+
+        if (nextRoundError) throw nextRoundError;
+
+        const nextRound = nextRounds?.[0];
+
+        if (nextRound) {
+          // Find first question in next round
+          const { data: firstQuestion, error: firstQuestionError } =
+            await supabaseAdmin
+              .from("questions")
+              .select(`
+                id,
+                round_id,
+                sort_order,
+                created_at
+              `)
+              .eq("round_id", nextRound.id)
+              .order("sort_order", { ascending: true })
+              .order("created_at", { ascending: true })
+              .limit(1)
+              .maybeSingle();
+
+          if (firstQuestionError) throw firstQuestionError;
+
+          if (firstQuestion) {
+            nextQuestion = firstQuestion;
+          }
+        }
+      }
+
+      // --------------------------------
+      // NO MORE QUESTIONS
+      // --------------------------------
+      if (!nextQuestion) {
         return NextResponse.json(
           {
             success: false,
-            error: "No next question in this round."
+            error: "No more questions available."
           },
           { status: 409 }
         );
       }
 
+      // --------------------------------
+      // MOVE TO NEXT QUESTION
+      // --------------------------------
       patch = {
-        active_question_id: n.id,
-        active_round_id: n.round_id,
+        active_question_id: nextQuestion.id,
+        active_round_id: nextQuestion.round_id,
         question_visible: false,
         logo_visible: false,
         buzzer_open: false,
@@ -176,6 +297,9 @@ export async function POST(req: Request) {
       };
     }
 
+    // --------------------------------
+    // UNKNOWN ACTION
+    // --------------------------------
     if (Object.keys(patch).length === 0) {
       return NextResponse.json(
         {
@@ -186,6 +310,9 @@ export async function POST(req: Request) {
       );
     }
 
+    // --------------------------------
+    // UPDATE EVENT
+    // --------------------------------
     const { error } = await supabaseAdmin
       .from("events")
       .update(patch)
@@ -193,16 +320,20 @@ export async function POST(req: Request) {
 
     if (error) throw error;
 
-    return NextResponse.json({ success: true });
+    return NextResponse.json({
+      success: true
+    });
 
   } catch (e) {
-
     console.error("ORGANISER ACTION ERROR", e);
 
     return NextResponse.json(
       {
         success: false,
-        error: e instanceof Error ? e.message : "Action failed"
+        error:
+          e instanceof Error
+            ? e.message
+            : "Action failed"
       },
       { status: 500 }
     );
