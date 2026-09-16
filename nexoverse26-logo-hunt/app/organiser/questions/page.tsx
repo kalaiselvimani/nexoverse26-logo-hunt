@@ -1,9 +1,519 @@
- "use client";
-import{useEffect,useState}from"react";import{useRouter}from"next/navigation";
-export default function Questions(){const[newRound,setNewRound]=useState("");const[qs,setQs]=useState<any[]>([]);const[rounds,setRounds]=useState<any[]>([]);const[f,setF]=useState<any>({roundId:"",questionText:"",correctAnswer:"",points:10,timerSeconds:30,sortOrder:1,logoUrl:""});const[err,setErr]=useState("");const router=useRouter();
- async function load(){const[r1,r2]=await Promise.all([fetch("/api/organiser/questions"),fetch("/api/organiser/rounds")]);if(r1.status===401){router.push("/organiser/login");return}const a=await r1.json().catch(()=>null),b=await r2.json().catch(()=>null);if(!r1.ok){setErr(a?.error||"Failed");return}setQs(a.questions||[]);setRounds(b?.rounds||[]);if(!f.roundId&&b?.rounds?.[0])setF((x:any)=>({...x,roundId:b.rounds[0].id}))}
- useEffect(()=>{load()},[]);
- async function addRound(){const r=await fetch("/api/organiser/rounds",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:newRound,sortOrder:rounds.length+1})});const d=await r.json().catch(()=>null);if(!r.ok){setErr(d?.error||"Round could not be created");return}setNewRound("");load()}
- async function upload(file:File){const fd=new FormData();fd.append("file",file);const r=await fetch("/api/organiser/upload",{method:"POST",body:fd});const d=await r.json().catch(()=>null);if(!r.ok){setErr(d?.error||"Upload failed");return}setF((x:any)=>({...x,logoUrl:d.url}))}
- async function save(e:any){e.preventDefault();const r=await fetch("/api/organiser/questions",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(f)});const d=await r.json().catch(()=>null);if(!r.ok){setErr(d?.error||"Save failed");return}setF({roundId:rounds[0]?.id||"",questionText:"",correctAnswer:"",points:10,timerSeconds:30,sortOrder:qs.length+2,logoUrl:""});load()}
- return <main className="shell"><div className="top"><div><div className="tag">NEXOVERSE'26 • ORGANISER</div><h1>Question Manager</h1></div><a className="btn" href="/organiser/dashboard">Dashboard</a></div>{err&&<p className="error">{err}</p>}<div className="grid grid2"><div className="card"><h2>Rounds</h2><div className="form"><input className="input" placeholder="New round name" value={newRound} onChange={e=>setNewRound(e.target.value)}/><button type="button" className="btn" onClick={addRound} disabled={!newRound.trim()}>Add Round</button></div><p className="muted">{rounds.map(r=>r.name).join(" • ")||"No rounds yet"}</p><hr style={{borderColor:"#26314a",margin:"20px 0"}}/><h2>Add Question</h2><form className="form" onSubmit={save}><select className="input" value={f.roundId} onChange={e=>setF({...f,roundId:e.target.value})} required><option value="">Select round</option>{rounds.map(r=><option key={r.id} value={r.id}>{r.name}</option>)}</select><textarea className="input" rows={5} placeholder="Question text" value={f.questionText} onChange={e=>setF({...f,questionText:e.target.value})} required/><input className="input" placeholder="Correct answer (organiser only)" value={f.correctAnswer} onChange={e=>setF({...f,correctAnswer:e.target.value})} required/><input className="input" type="number" placeholder="Points" value={f.points} onChange={e=>setF({...f,points:e.target.value})}/><input className="input" type="number" placeholder="Timer seconds" value={f.timerSeconds} onChange={e=>setF({...f,timerSeconds:e.target.value})}/><input className="input" type="number" placeholder="Question order" value={f.sortOrder} onChange={e=>setF({...f,sortOrder:e.target.value})}/><input className="input" type="file" accept="image/*" onChange={e=>e.target.files?.[0]&&upload(e.target.files[0])}/>{f.logoUrl&&<img className="logo" style={{maxHeight:180}} src={f.logoUrl} alt="preview"/>}<button className="btn primary">Save Question</button></form></div><div className="card"><h2>Questions</h2><table className="table"><thead><tr><th>#</th><th>Round</th><th>Question</th><th>Points</th></tr></thead><tbody>{qs.map((q:any,i)=><tr key={q.id}><td>{q.sort_order}</td><td>{q.rounds?.name||q.round_id}</td><td>{q.question_text}</td><td>{q.points}</td></tr>)}</tbody></table></div></div></main>}
+"use client";
+
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+
+export default function Questions() {
+  const [newRound, setNewRound] = useState("");
+  const [qs, setQs] = useState<any[]>([]);
+  const [rounds, setRounds] = useState<any[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [f, setF] = useState<any>({
+    roundId: "",
+    questionText: "",
+    correctAnswer: "",
+    points: 10,
+    timerSeconds: 30,
+    sortOrder: 1,
+    logoUrl: "",
+  });
+
+  const [err, setErr] = useState("");
+  const router = useRouter();
+
+  async function load() {
+    const [r1, r2] = await Promise.all([
+      fetch("/api/organiser/questions"),
+      fetch("/api/organiser/rounds"),
+    ]);
+
+    if (r1.status === 401) {
+      router.push("/organiser/login");
+      return;
+    }
+
+    const a = await r1.json().catch(() => null);
+    const b = await r2.json().catch(() => null);
+
+    if (!r1.ok) {
+      setErr(a?.error || "Failed");
+      return;
+    }
+
+    setQs(a.questions || []);
+    setRounds(b?.rounds || []);
+
+    if (!f.roundId && b?.rounds?.[0]) {
+      setF((x: any) => ({
+        ...x,
+        roundId: b.rounds[0].id,
+      }));
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function addRound() {
+    const r = await fetch("/api/organiser/rounds", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        name: newRound,
+        sortOrder: rounds.length + 1,
+      }),
+    });
+
+    const d = await r.json().catch(() => null);
+
+    if (!r.ok) {
+      setErr(d?.error || "Round could not be created");
+      return;
+    }
+
+    setNewRound("");
+    load();
+  }
+
+  async function upload(file: File) {
+    const fd = new FormData();
+
+    fd.append("file", file);
+
+    const r = await fetch("/api/organiser/upload", {
+      method: "POST",
+      body: fd,
+    });
+
+    const d = await r.json().catch(() => null);
+
+    if (!r.ok) {
+      setErr(d?.error || "Upload failed");
+      return;
+    }
+
+    setF((x: any) => ({
+      ...x,
+      logoUrl: d.url,
+    }));
+  }
+
+  function resetForm() {
+    setEditingId(null);
+
+    setF({
+      roundId: rounds[0]?.id || "",
+      questionText: "",
+      correctAnswer: "",
+      points: 10,
+      timerSeconds: 30,
+      sortOrder: qs.length + 1,
+      logoUrl: "",
+    });
+  }
+
+  async function save(e: any) {
+    e.preventDefault();
+
+    setErr("");
+
+    const url = "/api/organiser/questions";
+
+    const method = editingId ? "PATCH" : "POST";
+
+    const body = editingId
+      ? {
+          id: editingId,
+          ...f,
+        }
+      : f;
+
+    const r = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+
+    const d = await r.json().catch(() => null);
+
+    if (!r.ok) {
+      setErr(
+        d?.error ||
+          (editingId
+            ? "Update failed"
+            : "Save failed")
+      );
+      return;
+    }
+
+    resetForm();
+
+    await load();
+  }
+
+  function editQuestion(q: any) {
+    setEditingId(q.id);
+
+    setF({
+      roundId: q.round_id,
+      questionText: q.question_text,
+      correctAnswer: q.correct_answer,
+      points: q.points,
+      timerSeconds: q.timer_seconds,
+      sortOrder: q.sort_order,
+      logoUrl: q.logo_url || "",
+    });
+
+    window.scrollTo({
+      top: 0,
+      behavior: "smooth",
+    });
+  }
+
+  async function deleteQuestion(id: string) {
+    const ok = window.confirm(
+      "Are you sure you want to delete this question?"
+    );
+
+    if (!ok) return;
+
+    setErr("");
+
+    const r = await fetch(
+      `/api/organiser/questions?id=${id}`,
+      {
+        method: "DELETE",
+      }
+    );
+
+    const d = await r.json().catch(() => null);
+
+    if (!r.ok) {
+      setErr(
+        d?.error ||
+          "Question could not be deleted"
+      );
+
+      return;
+    }
+
+    if (editingId === id) {
+      resetForm();
+    }
+
+    await load();
+  }
+
+  return (
+    <main className="shell">
+
+      <div className="top">
+
+        <div>
+          <div className="tag">
+            NEXOVERSE'26 • ORGANISER
+          </div>
+
+          <h1>Question Manager</h1>
+        </div>
+
+        <a
+          className="btn"
+          href="/organiser/dashboard"
+        >
+          Dashboard
+        </a>
+
+      </div>
+
+      {err && (
+        <p className="error">
+          {err}
+        </p>
+      )}
+
+      <div className="grid grid2">
+
+        {/* LEFT SIDE */}
+
+        <div className="card">
+
+          <h2>Rounds</h2>
+
+          <div className="form">
+
+            <input
+              className="input"
+              placeholder="New round name"
+              value={newRound}
+              onChange={(e) =>
+                setNewRound(e.target.value)
+              }
+            />
+
+            <button
+              type="button"
+              className="btn"
+              onClick={addRound}
+              disabled={!newRound.trim()}
+            >
+              Add Round
+            </button>
+
+          </div>
+
+          <p className="muted">
+            {rounds.map((r) => r.name).join(" • ") ||
+              "No rounds yet"}
+          </p>
+
+          <hr
+            style={{
+              borderColor: "#26314a",
+              margin: "20px 0",
+            }}
+          />
+
+          <h2>
+            {editingId
+              ? "Edit Question"
+              : "Add Question"}
+          </h2>
+
+          <form
+            className="form"
+            onSubmit={save}
+          >
+
+            <select
+              className="input"
+              value={f.roundId}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  roundId: e.target.value,
+                })
+              }
+              required
+            >
+
+              <option value="">
+                Select round
+              </option>
+
+              {rounds.map((r) => (
+                <option
+                  key={r.id}
+                  value={r.id}
+                >
+                  {r.name}
+                </option>
+              ))}
+
+            </select>
+
+            <textarea
+              className="input"
+              rows={5}
+              placeholder="Question text"
+              value={f.questionText}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  questionText:
+                    e.target.value,
+                })
+              }
+              required
+            />
+
+            <input
+              className="input"
+              placeholder="Correct answer (organiser only)"
+              value={f.correctAnswer}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  correctAnswer:
+                    e.target.value,
+                })
+              }
+              required
+            />
+
+            <input
+              className="input"
+              type="number"
+              placeholder="Points"
+              value={f.points}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  points: e.target.value,
+                })
+              }
+            />
+
+            <input
+              className="input"
+              type="number"
+              placeholder="Timer seconds"
+              value={f.timerSeconds}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  timerSeconds:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              className="input"
+              type="number"
+              placeholder="Question order"
+              value={f.sortOrder}
+              onChange={(e) =>
+                setF({
+                  ...f,
+                  sortOrder:
+                    e.target.value,
+                })
+              }
+            />
+
+            <input
+              className="input"
+              type="file"
+              accept="image/*"
+              onChange={(e) => {
+                if (e.target.files?.[0]) {
+                  upload(e.target.files[0]);
+                }
+              }}
+            />
+
+            {f.logoUrl && (
+              <img
+                className="logo"
+                style={{
+                  maxHeight: 180,
+                }}
+                src={f.logoUrl}
+                alt="preview"
+              />
+            )}
+
+            <button
+              className="btn primary"
+            >
+              {editingId
+                ? "Update Question"
+                : "Save Question"}
+            </button>
+
+            {editingId && (
+              <button
+                type="button"
+                className="btn"
+                onClick={resetForm}
+              >
+                Cancel Edit
+              </button>
+            )}
+
+          </form>
+
+        </div>
+
+
+        {/* RIGHT SIDE */}
+
+        <div className="card">
+
+          <h2>Questions</h2>
+
+          <table className="table">
+
+            <thead>
+
+              <tr>
+                <th>#</th>
+                <th>Round</th>
+                <th>Question</th>
+                <th>Points</th>
+                <th>Actions</th>
+              </tr>
+
+            </thead>
+
+            <tbody>
+
+              {qs.map((q: any) => (
+
+                <tr key={q.id}>
+
+                  <td>
+                    {q.sort_order}
+                  </td>
+
+                  <td>
+                    {q.rounds?.name ||
+                      q.round_id}
+                  </td>
+
+                  <td>
+                    {q.question_text}
+                  </td>
+
+                  <td>
+                    {q.points}
+                  </td>
+
+                  <td>
+
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        editQuestion(q)
+                      }
+                    >
+                      Edit
+                    </button>
+
+                    {" "}
+
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() =>
+                        deleteQuestion(q.id)
+                      }
+                    >
+                      Delete
+                    </button>
+
+                  </td>
+
+                </tr>
+
+              ))}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+
+    </main>
+  );
+}

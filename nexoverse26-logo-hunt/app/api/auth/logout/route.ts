@@ -1,6 +1,25 @@
 import { NextResponse } from "next/server";
+
 export async function POST() {
-  const r=NextResponse.json({success:true});
-  r.cookies.set("nx_session","",{httpOnly:true,expires:new Date(0),path:"/"});
-  return r;
+  const res = NextResponse.json({
+    success: true,
+  });
+
+  res.cookies.set("nx_organiser_session", "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+
+  res.cookies.set("nx_participant_session", "", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/",
+    maxAge: 0,
+  });
+
+  return res;
 }
