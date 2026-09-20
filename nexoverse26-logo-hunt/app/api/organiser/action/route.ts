@@ -40,46 +40,63 @@ export async function POST(req: Request) {
     // START GAME
     // --------------------------------
     if (action === "start_game") {
-      let qid = event.active_question_id;
-      let rid = event.active_round_id;
+  // Always restart from Round 1 -> Question 1
 
-      if (!qid) {
-        const { data: first, error } = await supabaseAdmin
-          .from("questions")
-          .select("id,round_id")
-          .order("sort_order", { ascending: true })
-          .order("created_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
+  const { data: firstRound, error: roundError } =
+    await supabaseAdmin
+      .from("rounds")
+      .select("id,sort_order,created_at")
+      .eq("event_id", event.id)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-        if (error) throw error;
+  if (roundError) throw roundError;
 
-        if (!first) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Add at least one question before starting the game."
-            },
-            { status: 409 }
-          );
-        }
+  if (!firstRound) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Add at least one round before starting the game."
+      },
+      { status: 409 }
+    );
+  }
 
-        qid = first.id;
-        rid = first.round_id;
-      }
+  const { data: firstQuestion, error: questionError } =
+    await supabaseAdmin
+      .from("questions")
+      .select("id,round_id")
+      .eq("round_id", firstRound.id)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
-      patch = {
-        status: "running",
-        paused: false,
-        active_question_id: qid,
-        active_round_id: rid,
-        question_visible: false,
-        logo_visible: false,
-        buzzer_open: false,
-        buzzer_attempt: 0
-      };
-    }
+  if (questionError) throw questionError;
 
+  if (!firstQuestion) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Add at least one question to Round 1 before starting the game."
+      },
+      { status: 409 }
+    );
+  }
+
+  patch = {
+    status: "running",
+    paused: false,
+    active_question_id: firstQuestion.id,
+    active_round_id: firstRound.id,
+    question_visible: false,
+    logo_visible: false,
+    buzzer_open: false,
+    buzzer_attempt: 0
+  };
+}
     // --------------------------------
     // PAUSE
     // --------------------------------
@@ -296,6 +313,151 @@ export async function POST(req: Request) {
         paused: false
       };
     }
+    if (action === "previous_question") {
+  if (!event.active_question_id) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "No active question."
+      },
+      { status: 409 }
+    );
+  }
+
+  // Get current question
+  const { data: currentQuestion, error: currentError } =
+    await supabaseAdmin
+      .from("questions")
+      .select(`
+        id,
+        round_id,
+        sort_order,
+        created_at
+      `)
+      .eq("id", event.active_question_id)
+      .single();
+
+  if (currentError) throw currentError;
+
+  // --------------------------------
+  // STEP 1:
+  // Find previous question in SAME ROUND
+  // --------------------------------
+  let previousQuestion: any = null;
+
+  const { data: sameRoundQuestions, error: sameRoundError } =
+    await supabaseAdmin
+      .from("questions")
+      .select(`
+        id,
+        round_id,
+        sort_order,
+        created_at
+      `)
+      .eq("round_id", currentQuestion.round_id)
+      .order("sort_order", { ascending: true })
+      .order("created_at", { ascending: true });
+
+  if (sameRoundError) throw sameRoundError;
+
+  const currentIndex =
+    (sameRoundQuestions || []).findIndex(
+      (q) => q.id === currentQuestion.id
+    );
+
+  if (currentIndex > 0) {
+    previousQuestion =
+      sameRoundQuestions[currentIndex - 1];
+  }
+
+  // --------------------------------
+  // STEP 2:
+  // If this is first question of the
+  // round, find PREVIOUS ROUND
+  // --------------------------------
+  if (!previousQuestion) {
+    const { data: currentRound, error: roundError } =
+      await supabaseAdmin
+        .from("rounds")
+        .select(`
+          id,
+          sort_order,
+          created_at
+        `)
+        .eq("id", currentQuestion.round_id)
+        .single();
+
+    if (roundError) throw roundError;
+
+    // Find previous round
+    const { data: previousRounds, error: previousRoundError } =
+      await supabaseAdmin
+        .from("rounds")
+        .select(`
+          id,
+          sort_order,
+          created_at
+        `)
+        .lt("sort_order", currentRound.sort_order)
+        .order("sort_order", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1);
+
+    if (previousRoundError) throw previousRoundError;
+
+    const previousRound = previousRounds?.[0];
+
+    if (previousRound) {
+      // Find LAST question in previous round
+      const { data: lastQuestion, error: lastQuestionError } =
+        await supabaseAdmin
+          .from("questions")
+          .select(`
+            id,
+            round_id,
+            sort_order,
+            created_at
+          `)
+          .eq("round_id", previousRound.id)
+          .order("sort_order", { ascending: false })
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+      if (lastQuestionError) throw lastQuestionError;
+
+      if (lastQuestion) {
+        previousQuestion = lastQuestion;
+      }
+    }
+  }
+
+  // --------------------------------
+  // NO PREVIOUS QUESTION
+  // --------------------------------
+  if (!previousQuestion) {
+    return NextResponse.json(
+      {
+        success: false,
+        error: "Already at the first question."
+      },
+      { status: 409 }
+    );
+  }
+
+  // --------------------------------
+  // MOVE TO PREVIOUS QUESTION
+  // --------------------------------
+  patch = {
+    active_question_id: previousQuestion.id,
+    active_round_id: previousQuestion.round_id,
+    question_visible: false,
+    logo_visible: false,
+    buzzer_open: false,
+    buzzer_attempt: 0,
+    paused: false
+  };
+}
 
     // --------------------------------
     // UNKNOWN ACTION

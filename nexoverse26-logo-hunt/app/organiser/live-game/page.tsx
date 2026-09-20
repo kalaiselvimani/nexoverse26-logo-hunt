@@ -190,15 +190,15 @@ export default function LiveGame() {
 
         <div className="actions">
           {[
-            "start_game",
-            "reveal_question",
-            "reveal_logo",
-            "open_buzzer",
-            "close_buzzer",
-            "reopen_buzzer",
-            "next_question",
-            "end_game",
-          ].map((action) => (
+  "start_game",
+  "reveal_question",
+  "reveal_logo",
+  "open_buzzer",
+  "close_buzzer",
+  "previous_question",
+  "next_question",
+  "end_game",
+].map((action) => (
             <button
               className="btn primary"
               key={action}

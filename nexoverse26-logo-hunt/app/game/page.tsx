@@ -171,12 +171,8 @@ export default function Game() {
     <main className="shell">
       <div className="top">
         <div className="brand">
-          NEXOVERSE
-          <span className="accent">
-            '26
-          </span>{" "}
-          • LOGO HUNT
-        </div>
+  NEXOVERSE<span className="accent">'26</span> • BRAND STALKER • LOGO HUNT
+</div>
 
         <div className="pill">
           {g.paused
